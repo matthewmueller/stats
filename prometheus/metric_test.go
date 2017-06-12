@@ -52,7 +52,7 @@ func TestMetricStore(t *testing.T) {
 }
 
 func TestMetricEntryCleanup(t *testing.T) {
-	now := time.Now()
+	now := timeNow()
 
 	empty := false
 	entry := metricEntry{
@@ -60,12 +60,12 @@ func TestMetricEntryCleanup(t *testing.T) {
 		name:  "A",
 		states: metricStateMap{
 			0: []*metricState{
-				&metricState{value: 42, time: now},
-				&metricState{value: 1, time: now.Add(-time.Minute)},
-				&metricState{value: 2, time: now.Add(-(500 * time.Millisecond))},
+				&metricState{value: 42, time: makeAtomicTime(now)},
+				&metricState{value: 1, time: makeAtomicTime(now.Add(-time.Minute))},
+				&metricState{value: 2, time: makeAtomicTime(now.Add(-(500 * time.Millisecond)))},
 			},
 			1: []*metricState{
-				&metricState{value: 123, time: now.Add(10 * time.Millisecond)},
+				&metricState{value: 123, time: makeAtomicTime(now.Add(10 * time.Millisecond))},
 			},
 			2: []*metricState{},
 		},
@@ -82,11 +82,11 @@ func TestMetricEntryCleanup(t *testing.T) {
 
 	if !reflect.DeepEqual(entry.states, metricStateMap{
 		0: []*metricState{
-			&metricState{value: 42, time: now},
-			&metricState{value: 2, time: now.Add(-(500 * time.Millisecond))},
+			&metricState{value: 42, time: makeAtomicTime(now)},
+			&metricState{value: 2, time: makeAtomicTime(now.Add(-(500 * time.Millisecond)))},
 		},
 		1: []*metricState{
-			&metricState{value: 123, time: now.Add(10 * time.Millisecond)},
+			&metricState{value: 123, time: makeAtomicTime(now.Add(10 * time.Millisecond))},
 		},
 	}) {
 		t.Errorf("bad entry states: %#v", entry.states)
@@ -102,7 +102,7 @@ func TestMetricEntryCleanup(t *testing.T) {
 
 	if !reflect.DeepEqual(entry.states, metricStateMap{
 		1: []*metricState{
-			&metricState{value: 123, time: now.Add(10 * time.Millisecond)},
+			&metricState{value: 123, time: makeAtomicTime(now.Add(10 * time.Millisecond))},
 		},
 	}) {
 		t.Errorf("bad entry states: %#v", entry.states)
@@ -121,7 +121,7 @@ func TestMetricEntryCleanup(t *testing.T) {
 }
 
 func TestMetricStoreCleanup(t *testing.T) {
-	now := time.Now()
+	now := timeNow()
 
 	store := metricStore{}
 	store.update(metric{mtype: counter, name: "A", value: 1, time: now.Add(-time.Hour)}, nil)
@@ -158,8 +158,12 @@ func TestMetricStoreCleanup(t *testing.T) {
 	sort.Sort(byNameAndLabels(metrics))
 
 	if !reflect.DeepEqual(metrics, []metric{
-		{mtype: counter, name: "E", value: 1, time: now.Add(time.Second), labels: labels{}},
+		{mtype: counter, name: "E", value: 1, time: now.Add(time.Second).In(time.UTC), labels: labels{}},
 	}) {
 		t.Errorf("bad metrics: %#v", metrics)
 	}
+}
+
+func timeNow() time.Time {
+	return time.Now().Truncate(time.Millisecond)
 }

@@ -219,16 +219,13 @@ func (entry *metricEntry) cleanup(exp time.Time, empty func()) {
 
 		for j, state := range states {
 			states[j] = nil
-			state.mutex.Lock()
 
 			// We expire all entries that have been last updated before exp,
 			// they don't get copied back into the state slice.
-			if exp.Before(state.time) {
+			if exp.Before(state.time.load()) {
 				states[i] = state
 				i++
 			}
-
-			state.mutex.Unlock()
 		}
 
 		if states = states[:i]; len(states) == 0 {
@@ -249,12 +246,11 @@ type metricState struct {
 	// immutable
 	labels labels
 	// mutable
-	mutex   sync.Mutex
 	buckets metricBuckets
-	value   float64
-	sum     float64
-	count   uint64
-	time    time.Time
+	value   atomicFloat64
+	sum     atomicFloat64
+	count   atomicFloat64
+	time    atomicTime
 }
 
 func newMetricState(labels labels) *metricState {
@@ -264,31 +260,26 @@ func newMetricState(labels labels) *metricState {
 }
 
 func (state *metricState) update(mtype metricType, value float64, time time.Time, buckets []float64) {
-	state.mutex.Lock()
-
 	switch mtype {
 	case counter:
-		state.value += value
+		state.value.add(value)
 
 	case gauge:
-		state.value = value
+		state.value.store(value)
 
 	case histogram:
 		if len(state.buckets) != len(buckets) {
 			state.buckets = makeMetricBuckets(buckets, state.labels)
 		}
 		state.buckets.update(value)
-		state.sum += value
-		state.count++
+		state.sum.add(value)
+		state.count.add(1)
 	}
 
-	state.time = time
-	state.mutex.Unlock()
+	state.time.store(time)
 }
 
 func (state *metricState) collect(metrics []metric, entry *metricEntry) []metric {
-	state.mutex.Lock()
-
 	switch entry.mtype {
 	case counter, gauge:
 		metrics = append(metrics, metric{
@@ -296,20 +287,23 @@ func (state *metricState) collect(metrics []metric, entry *metricEntry) []metric
 			scope:  entry.scope,
 			name:   entry.name,
 			help:   entry.help,
-			value:  state.value,
-			time:   state.time,
+			value:  state.value.load(),
+			time:   state.time.load(),
 			labels: state.labels,
 		})
 
 	case histogram:
-		for _, bucket := range state.buckets {
+		buckets := state.buckets
+		time := state.time.load()
+
+		for i := range buckets {
 			metrics = append(metrics, metric{
 				mtype:  entry.mtype,
 				name:   entry.bucket,
 				help:   entry.help,
-				value:  float64(bucket.count),
-				time:   state.time,
-				labels: bucket.labels,
+				value:  float64(buckets[i].count.load()),
+				time:   time,
+				labels: buckets[i].labels,
 			})
 		}
 		metrics = append(metrics,
@@ -317,22 +311,21 @@ func (state *metricState) collect(metrics []metric, entry *metricEntry) []metric
 				mtype:  entry.mtype,
 				name:   entry.sum,
 				help:   entry.help,
-				value:  state.sum,
-				time:   state.time,
+				value:  state.sum.load(),
+				time:   time,
 				labels: state.labels,
 			},
 			metric{
 				mtype:  entry.mtype,
 				name:   entry.count,
 				help:   entry.help,
-				value:  float64(state.count),
-				time:   state.time,
+				value:  float64(state.count.load()),
+				time:   time,
 				labels: state.labels,
 			},
 		)
 	}
 
-	state.mutex.Unlock()
 	return metrics
 }
 
@@ -355,8 +348,8 @@ func (m metricStateMap) find(key uint64, labels labels) *metricState {
 }
 
 type metricBucket struct {
+	count  atomicUint64
 	limit  float64
-	count  uint64
 	labels labels
 }
 
@@ -374,7 +367,7 @@ func makeMetricBuckets(buckets []float64, labels labels) metricBuckets {
 func (m metricBuckets) update(value float64) {
 	for i := range m {
 		if value <= m[i].limit {
-			m[i].count++
+			m[i].count.add(1)
 			break
 		}
 	}

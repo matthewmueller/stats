@@ -40,7 +40,10 @@ func (h *Handler) HandleMetric(m *stats.Metric) {
 
 	cache := handleMetricPool.Get().(*handleMetricCache)
 	cache.labels = cache.labels.appendTags(m.Tags...)
-	sort.Sort(cache)
+
+	if !sort.IsSorted(cache) {
+		sort.Sort(cache)
+	}
 
 	h.metrics.update(metric{
 		mtype:  metricTypeOf(m.Type),
