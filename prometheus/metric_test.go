@@ -1,6 +1,7 @@
 package prometheus
 
 import (
+	"fmt"
 	"reflect"
 	"sort"
 	"sync"
@@ -161,5 +162,38 @@ func TestMetricStoreCleanup(t *testing.T) {
 		{mtype: counter, name: "E", value: 1, time: now.Add(time.Second), labels: labels{}},
 	}) {
 		t.Errorf("bad metrics: %#v", metrics)
+	}
+}
+
+func BenchmarkMetricBucket(b *testing.B) {
+	makeBuckets := func(n int) metricBuckets {
+		buckets := make(metricBuckets, n)
+		for i := 0; i != n; i++ {
+			buckets[i].limit = float64(i)
+		}
+		return buckets
+	}
+
+	for _, buckets := range []metricBuckets{
+		makeBuckets(25),
+		makeBuckets(50),
+		makeBuckets(75),
+		makeBuckets(100),
+	} {
+		b.Run(fmt.Sprintf("search bucket of size %d", len(buckets)), func(b *testing.B) {
+			v := float64(len(buckets) / 2)
+
+			b.Run("using linear search", func(b *testing.B) {
+				for i := 0; i != b.N; i++ {
+					buckets.linearSearch(v)
+				}
+			})
+
+			b.Run("using binary search", func(b *testing.B) {
+				for i := 0; i != b.N; i++ {
+					buckets.binarySearch(v)
+				}
+			})
+		})
 	}
 }

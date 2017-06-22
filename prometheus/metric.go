@@ -1,6 +1,7 @@
 package prometheus
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -380,12 +381,31 @@ func makeMetricBuckets(buckets []float64, labels labels) metricBuckets {
 }
 
 func (m metricBuckets) update(value float64) {
+	if i := m.search(value); i < len(m) {
+		m[i].count++
+	}
+}
+
+func (m metricBuckets) search(value float64) int {
+	if len(m) < 80 {
+		return m.linearSearch(value)
+	}
+	return m.binarySearch(value)
+}
+
+func (m metricBuckets) linearSearch(value float64) int {
 	for i := range m {
 		if value <= m[i].limit {
-			m[i].count++
-			break
+			return i
 		}
 	}
+	return len(m)
+}
+
+func (m metricBuckets) binarySearch(value float64) int {
+	return sort.Search(len(m), func(i int) bool {
+		return m[i].limit >= value
+	})
 }
 
 func ftoa(f float64) string {
